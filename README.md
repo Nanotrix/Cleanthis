@@ -1,7 +1,5 @@
 # Cleanthis
 
-Just use this if you want to clean folder and move them into backup folder in home.
-Check the code if necessary. 
-Also, this code is good to be place at **$HOME/.local/bin** and change that code into **executable**
-so you can run anywhere.
-
+Just use this if you want to clean a folder and move the contents into a backup folder 
+in your home directory. Check the code if necessary. Additionally, this code is suitable 
+to be placed in `$HOME/.local/bin`. Change the file permissions to make it *executable* so you can run it from anywhere.
