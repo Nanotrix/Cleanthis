@@ -1,0 +1,43 @@
+default_directory = "/home/Users/backup"
+
+[types.images]
+extensions = [".jpg", ".jpeg", ".png", ".gif"]
+
+[types.documents]
+extensions = [".pdf", ".docx", ".txt"]
+
+[types.spreadsheets]
+extensions = [".xls", ".xlsx"]
+
+[types.videos]
+extensions = [".mp4", ".avi", ".mkv"]
+
+[types.audio]
+extensions = [".mp3", ".wav", ".flac"]
+
+[types.archives]
+extensions = [".zip", ".rar", ".tar", ".gz", ".7z"]
+
+[types.presentations]
+extensions = [".ppt", ".pptx", ".key"]
+
+[types.source_code]
+extensions = [".py", ".java", ".c", ".cpp", ".js", ".html", ".css"]
+
+[types.database]
+extensions = [".db", ".sql", ".sqlite"]
+
+[types.cad]
+extensions = [".dwg", ".dxf", ".svg"]
+
+[types.fonts]
+extensions = [".ttf", ".otf"]
+
+[types.markdown]
+extensions = [".md", ".rst"]
+
+[types.virtualization]
+extensions = [".vmdk", ".vhd", ".iso"]
+
+[types.web]
+extensions = [".json", ".xml", ".yml"]
