@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+
+import os
+import shutil
+import argparse
+import logging
+from pathlib import Path
+from tqdm import tqdm
+import re
+import random
+import string
+import datetime
+import signal
+import sys
+import toml  # Import toml library
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Define the default configuration file path
+DEFAULT_CONFIG_FILE = Path.home() / '.config' / 'personal' / 'cleanthis.toml'
+
+# Global variables for tracking progress
+file_moved = 0
+total_files = 0
+
+def load_config(config_file):
+    """Load the configuration from a TOML file."""
+    if not config_file.exists():
+        raise FileNotFoundError(f"Configuration file not found: {config_file}")
+    
+    try:
+        config = toml.load(config_file)
+        validate_config(config)
+        return config
+    except toml.TomlDecodeError as e:
+        raise ValueError(f"Error decoding TOML in configuration file: {e}")
+
+def validate_config(config):
+    """Validate the configuration file content."""
+    required_keys = {'default_directory', 'types'}
+    if not all(key in config for key in required_keys):
+        raise ValueError("Configuration file missing required keys.")
+    if not isinstance(config['types'], dict):
+        raise ValueError("Configuration 'types' must be a dictionary.")
+
+def get_target_folder(file_extension, config):
+    """Get the target folder for a given file extension based on the config."""
+    for folder_name, folder_config in config['types'].items():
+        if file_extension in folder_config.get('extensions', []):
+            return folder_name
+    return None
+
+def ensure_directory_exists(directory):
+    """Create directory if it does not exist."""
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise RuntimeError(f"Error creating directory {directory}: {e}")
+
+def generate_random_suffix(length=9):
+    """Generate a random suffix of given length."""
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+def get_unique_filename(directory, filename, is_duplicate):
+    """Generate a unique filename by adding a prefix or suffix if needed."""
+    base_name, ext = os.path.splitext(filename)
+    
+    if is_duplicate:
+        return f"dups_{generate_random_suffix()}{ext}"
+
+    # Add date to filename if not duplicate
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    new_filename = f"{base_name}_{today}{ext}"
+    
+    while (directory / new_filename).exists():
+        new_filename = f"{base_name}_{today}_{generate_random_suffix()}{ext}"
+    
+    return new_filename
+
+def signal_handler(sig, frame):
+    """Handle the interruption signal (Ctrl+C) gracefully."""
+    global file_moved
+    global total_files
+    print(f"\nProcess interrupted. Files moved: {file_moved}, Files remaining: {total_files - file_moved}")
+    sys.exit(1)
+
+def sort_files(source_folder, config_file, dry_run=False, recursive=False, include_hidden=False, show_progress=False):
+    """Sort files in the source_folder based on the config_file."""
+    config = load_config(config_file)
+    default_directory = Path(config['default_directory'])
+    
+    # Ensure default directory and type-specific subdirectories exist
+    ensure_directory_exists(default_directory)
+    for folder_name in config['types']:
+        ensure_directory_exists(default_directory / folder_name)
+
+    # Initialize counters
+    file_type_counts = {folder_name: 0 for folder_name in config['types']}
+    error_count = 0
+
+    # Set up signal handler for interruptions
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Walk through source folder
+    source_folder_path = Path(source_folder)
+    if not source_folder_path.exists():
+        raise FileNotFoundError(f"Source folder not found: {source_folder_path}")
+    if not source_folder_path.is_dir():
+        raise NotADirectoryError(f"Source path is not a directory: {source_folder_path}")
+
+    global total_files
+    total_files = sum(1 for _ in source_folder_path.rglob('*') if _.is_file() and (include_hidden or not _.name.startswith('.')))
+    
+    # Initialize progress bar only if not in dry run mode and progress bar is enabled
+    pbar = tqdm(total=total_files, desc='Processing files') if show_progress and not dry_run else None
+    
+    try:
+        for item in source_folder_path.rglob('*' if recursive else '*'):
+            if item.is_file() and (include_hidden or not item.name.startswith('.')):  # Process only files
+                file_extension = item.suffix.lower()
+                target_folder = get_target_folder(file_extension, config)
+                if target_folder:
+                    target_folder_path = default_directory / target_folder
+
+                    # Check if file already exists in the target directory
+                    is_duplicate = any(f.name == item.name for f in target_folder_path.glob('*'))
+                    
+                    # Ensure unique filename
+                    unique_filename = get_unique_filename(target_folder_path, item.name, is_duplicate)
+                    target_file_path = target_folder_path / unique_filename
+                    
+                    if dry_run:
+                        logger.info(f"Dry run: {item.name} would be moved to {target_file_path}")
+                    else:
+                        try:
+                            shutil.move(str(item), str(target_file_path))
+                            file_type_counts[target_folder] += 1
+                            global file_moved
+                            file_moved += 1
+                            if show_progress:
+                                pbar.update(1)
+                        except Exception as e:
+                            error_count += 1
+                            if not dry_run:
+                                logger.error(f"Error moving file {item.name}: {e}")
+    finally:
+        if pbar:
+            pbar.close()
+    
+    # Print summary
+    summary = "Summary:\n"
+    for file_type, count in file_type_counts.items():
+        summary += f"{file_type}: {count} "
+    if error_count > 0:
+        summary += f"Error: {error_count} "
+    
+    print(summary)
+
+def main():
+    parser = argparse.ArgumentParser(description='Sort files into a default directory based on their types.')
+    parser.add_argument('source_folder', type=str, help='The path to the source folder containing the files to be sorted.')
+    parser.add_argument('--config_file', type=str, default=str(DEFAULT_CONFIG_FILE), help='The path to the configuration file. Defaults to "~/.config/personal/cleanthis.toml".')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose mode for detailed logging.')
+    parser.add_argument('--dry-run', action='store_true', help='Simulate file movements without making changes.')
+    parser.add_argument('--recursive', action='store_true', help='Process files in subdirectories recursively.')
+    parser.add_argument('--include-hidden', action='store_true', help='Include hidden files in the processing.')
+    parser.add_argument('--progress', action='store_true', help='Show progress bar during file processing.')
+
+    args = parser.parse_args()
+
+    # Set logging level based on verbose mode
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    
+    # Use default config file if provided one does not exist
+    config_file = Path(args.config_file)
+    if not config_file.exists():
+        logger.warning(f"Specified config file does not exist. Using default config file: {DEFAULT_CONFIG_FILE}")
+        config_file = DEFAULT_CONFIG_FILE
+
+    try:
+        sort_files(
+            args.source_folder,
+            config_file,
+            dry_run=args.dry_run,
+            recursive=args.recursive,
+            include_hidden=args.include_hidden,
+            show_progress=args.progress
+        )
+    except Exception as e:
+        logger.error(f"Error: {e}")
+
+if __name__ == "__main__":
+    main()
